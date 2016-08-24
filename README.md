@@ -7,6 +7,7 @@
 + `table = [[tdNode, tdNode],[tdNode, tdNode]]`
 + Nodex结构，是实现里面的一个结构，每一个Node对应于一个tr
 + Tree结构，是实现里面的一个结构，Tree对应于整个table
+
 ### 接口
 + genTable
     - 基于传入的符合格式的数据进行生成对应的模板并渲染在页面上；
@@ -46,55 +47,55 @@
     - 基于页面上已有的模板数据进行加工成x-treetable
     - 例子
         * html:
-```html
-        <div class="x-treetable">
-  <div class="x-thead">
-    <div class="x-tr">
-      <span class="x-th">功能</span>
-      <span class="x-th">操作</span>
-      <span class="x-th">操作</span>
-    </div>
-  </div>
-  <div class="x-tbody">
-    <div class="x-tr" data-tt-id="1">
-      <span class="x-td">
-        <span class="x-content">test</span>
-      </span>
-      <span class="x-td">
-        <span class="x-content">删除</span>
-      </span>
-      <span class="x-td">
-        <span class="x-content">删除</span>
-      </span>       
-    </div>
-    <div class="x-tr" data-tt-id="11" data-tt-parent-id="1">
-      <span class="x-td">
-        <span class="x-content" style="padding-left: 19px">test</span>
-      </span>
-      <span class="x-td">
-        <span class="x-content">删除</span>
-      </span>
-      <span class="x-td">
-        <span class="x-content">删除</span>
-      </span>       
-    </div>      
-    <div class="x-tr" data-tt-id="2">
-      <span class="x-td">
-        <span class="x-content">test</span>
-      </span>
-      <span class="x-td">
-        <span class="x-content">删除</span>
-      </span>
-      <span class="x-td">
-        <span class="x-content">删除</span>
-      </span>       
-    </div>
-  </div>
-  <div class="x-tfoot">
+        ```html
+                <div class="x-treetable">
+          <div class="x-thead">
+            <div class="x-tr">
+              <span class="x-th">功能</span>
+              <span class="x-th">操作</span>
+              <span class="x-th">操作</span>
+            </div>
+          </div>
+          <div class="x-tbody">
+            <div class="x-tr" data-tt-id="1">
+              <span class="x-td">
+                <span class="x-content">test</span>
+              </span>
+              <span class="x-td">
+                <span class="x-content">删除</span>
+              </span>
+              <span class="x-td">
+                <span class="x-content">删除</span>
+              </span>       
+            </div>
+            <div class="x-tr" data-tt-id="11" data-tt-parent-id="1">
+              <span class="x-td">
+                <span class="x-content" style="padding-left: 19px">test</span>
+              </span>
+              <span class="x-td">
+                <span class="x-content">删除</span>
+              </span>
+              <span class="x-td">
+                <span class="x-content">删除</span>
+              </span>       
+            </div>      
+            <div class="x-tr" data-tt-id="2">
+              <span class="x-td">
+                <span class="x-content">test</span>
+              </span>
+              <span class="x-td">
+                <span class="x-content">删除</span>
+              </span>
+              <span class="x-td">
+                <span class="x-content">删除</span>
+              </span>       
+            </div>
+          </div>
+          <div class="x-tfoot">
 
-  </div>
-</div>
-```
+          </div>
+        </div>
+        ```
         * js: `$('.x-treetable').xtreetable('init', options)`
     - 参数说明
         * options同genTable时的options；
