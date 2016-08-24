@@ -48,7 +48,7 @@
     - 例子
         * html:
         ```html
-                <div class="x-treetable">
+        <div class="x-treetable">
           <div class="x-thead">
             <div class="x-tr">
               <span class="x-th">功能</span>
@@ -92,7 +92,6 @@
             </div>
           </div>
           <div class="x-tfoot">
-
           </div>
         </div>
         ```
