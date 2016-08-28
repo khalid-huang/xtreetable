@@ -1,11 +1,11 @@
 (function(window, $) {
-  var Node, Tree, methods, likeTable;
+  var Node, Tree, methods, likeTable, genTpl, Search;
   Node = (function(){
-    function Node(row, tree, table, settings) {
+    function Node(row, nodesObj, tree, settings) {
       var parentId;
       this.row = row; //保存对应的DOM结点
+      this.nodesObj = nodesObj;
       this.tree = tree;
-      this.table = table;
       this.settings = settings;
 
       this.id = this.row.data(this.settings.nodeIdAttr);
@@ -21,6 +21,7 @@
       }
       this.children = [];
       this.initialized = false;
+      this.fragment; //用于暂缓存一些
     }
 
     Node.prototype.getNextChildId = function() {
@@ -57,25 +58,6 @@
       }
       //this.row.show();
 
-      //从fragment里面将对应的DOM元素抽离出来; 这样真有意义吗？导致页面卡的原因是DOM太多还是DOM操作
-      /*var fragments = this.table.fragments,
-        id = this.id,
-        row = fragments[id];
-      if(row) {
-        var set = this.nodeSet(),
-          target;
-        //这里的set只能是children而不可能是roots
-        if(set.length === 0 || set.indexOf(this) === 0) {
-          target = this.parentNode();
-          target.row.after(row)
-        } else {
-          var preInd = set.indexOf(this) - 1;
-          target = this.parentNode().children[preInd];
-          target.row.after(row);
-        }
-        fragments[id] = null;        
-      }*/
-
       this.row.slideDown();
 
       if(this.expanded()) {
@@ -84,18 +66,20 @@
       return this;
     }
 
+    Node.prototype.init = function() {
+       if (!this.initialized) {
+        this._initialize();
+      }
+      return this;     
+    }
+
+
     Node.prototype.hide = function() {
       this._hideChildren();
       //this.row.hide();
-      this.row.slideUp()
-      //隐藏完后，将对应的DOM元素放到fragment
-      /*var fragments = this.table.fragments,
-        id = this.id,
-        self = this;
-      this.row.slideUp("normal", function(){
-        fragments[id] = $(document.createDocumentFragment());
-        fragments[id].append(self.row);
-      });*/
+      //root层的结点是不收缩的
+      if(this.tree.roots.indexOf(this) == -1)
+        this.row.slideUp()
 
       return this;
     }
@@ -105,7 +89,7 @@
       if(this.parentNode() != null) {
         return this.parentNode().children;
       } else {
-        return this.table.roots;
+        return this.tree.roots;
       }
     }
 
@@ -122,7 +106,7 @@
       var settings = this.settings;
       this.render();
 
-      if(settings.expandable === true && settings.initialState === "collapsed") {
+      if(settings.expandable === true && settings.initialState === "Collapse") {
         this.collapse();
       } else {
         this.expand();
@@ -137,8 +121,16 @@
         return this;
       }
 
-      this.row.removeClass("collapsed").addClass("expanded");
-
+      this.row.removeClass("collapsed").addClass("expanded");      
+      if(this.row.hasClass('branch')) {
+        var expender = this.row.find('.x-td').eq(0).children().eq(0)
+        if(expender.hasClass('symbol')) {
+          expender.remove()
+        }
+        var target = $(this.settings.collapserTemplate).css('left', this.level() * this.settings.indent + 'px')
+        this.row.find('.x-td').eq(0).prepend(target);
+      }
+      
       if($(this.row).is(":visible")) {
         this._showChildren();
       }
@@ -152,8 +144,16 @@
       }
 
       this.row.removeClass('expanded').addClass('collapsed');
-      this._hideChildren();
+      if(this.row.hasClass('branch')) {
+        var collapser = this.row.find('.x-td').eq(0).children().eq(0);
+        if(collapser.hasClass('symbol')) {
+          collapser.remove()
+        }
+        var target = $(this.settings.expanderTemplate).css('left', this.level() * this.settings.indent + 'px')      
+        this.row.find('.x-td').eq(0).prepend(target);     
+      }
 
+      this._hideChildren();
       return this;
     }
 
@@ -231,6 +231,8 @@
         moveDownTarget = this.moveDownTarget;
         moveUpTarget.off('click.xtreetable').on('click.xtreetable', moveUpHandler);
         moveDownTarget.off('click.x-treetable').on('click.xtreetable', moveDownHandler);
+
+        this.updateMoveableClass()
       }
 
       if(settings.contenteditable === true) {
@@ -289,7 +291,7 @@
 
     Node.prototype.parentNode = function() {
       if(this.parentId != null) {
-        return this.tree[this.parentId]
+        return this.nodesObj[this.parentId]
       } else {
         return null;
       }
@@ -313,7 +315,7 @@
 
     //direction: + 表示上移；- 表示下移
     Node.prototype.move = function(direction) {
-      var slibings = this.parentId == null ? this.table.roots :  this.parentNode().children,
+      var slibings = this.parentId == null ? this.tree.roots :  this.parentNode().children,
         index = slibings.indexOf(this),
         dirIndex = direction === '+' ? index - 1 : index + 1,
         tmp = slibings[index];
@@ -360,7 +362,7 @@
     }
 
     Node.prototype.updateMoveableClass = function(){
-      var slibings = this.parentId == null ? this.table.roots : this.parentNode().children,
+      var slibings = this.parentId == null ? this.tree.roots : this.parentNode().children,
         index = slibings.indexOf(this);
       if(index === 0) {
         this.moveUpTarget.addClass('x-move-disable');
@@ -374,6 +376,35 @@
       }
     }
 
+    Node.prototype.updateSearchClass = function() {
+      if(this.searchActive) {
+        this.row.addClass('x-search-active');
+      } else {
+        this.row.removeClass('x-search-active')
+      }
+      if(this.searchHightligth) {
+        this.row.addClass('x-search-hightlight')
+      } else {
+        this.row.removeClass('x-search-hightlight')
+      }
+      return this;
+    }
+
+    Node.prototype.scrollTo = function() {
+      if(this.parentId) {
+        var parent = this.parentNode();
+        while(parent) {
+          parent.expand();
+          parent = parent.parentNode();
+        }
+      }
+/*      console.log('tbody-top', this.tree.table.find('.x-tbody').offset().top)
+      console.log('node-top', this.row.offset().top)
+      console.log('node-top-position', this.row.position().top)*/
+      //这个bug是怎么加速呢，表现为这里面的top与实际的表现不符中，第四个的时候会突然比前面的小
+      this.tree.scrollTo(this.row.position().top)
+    }
+
     return Node;
   })()
 
@@ -381,14 +412,25 @@
     function Tree(table, settings) {
       this.table = table
       this.settings = settings;
-      this.tree = {};
+      this.nodesObj = {};
 
       //下面两个缓存是用于快速定位的
       this.nodes = [];
       this.roots = [];
-      this.fragments = {};//用于缓存没有显示的结点，拉出页面
+      this.fragment = {}; //用于暂时的保存一些DOM,在fragmetn里面进行操作会高效很多；
+
+      //增加一些整个表的操作
     }
 
+    Tree.prototype.collapseAll = function() {
+      var result = []
+      for(var i = 0, len = this.nodes.length; i < len; i++) {
+        result.push(this.nodes[i].collapse());
+      }
+      return result
+    }
+
+    //用于获取下一个要生成的Node的ttid
     Tree.prototype.getNextRootId = function() {
       var maxId = 0;
       this.roots.forEach(function(node) {
@@ -399,18 +441,48 @@
       return maxId + 1;
     }
 
+    //用于根据目前的roots数组的位置信息更新DOM位置,策略是将使用detach将元素从DOM树移出，但保留引用，然后再去一个个插入;传入的sortFunc是用于判断当有的话，对子元素也进行排序;对DOM的操作都集中在fragment里面进行操作，不直接在document里面操作，这样会更加高效,防止多次回流
+    Tree.prototype.updateRootRows = function(sortFunc) {
+
+      var roots = this.roots;
+      this.table.find('.x-tbody').children().detach();
+
+      this.fragment = $(document.createDocumentFragment());
+
+      for(var i = 0, len = this.roots.length; i < len; i++) {
+        this._updateRootRows(this.roots[i], sortFunc);
+      }
+    }
+
+    //保留引用在DOM里面，直接按顺序insertAfter到tbody后面就可以了
+    Tree.prototype._updateRootRows = function(root, sortFunc) {
+      var children = root.children;
+      if(sortFunc) {
+        children.sort(sortFunc);
+      }
+      root.row.appendTo(this.fragment);
+      //root.row.appendTo(this.table.find('.x-tbody'))
+      root.render();
+
+      for(var i = children.length - 1; i >= 0; i--) {
+        this._updateChildRows(root);
+      }
+
+      this.table.find('.x-tbody').append(this.fragment)
+    }
+
     Tree.prototype.loadRows = function(rows) {
       var node, row, i;
+
       if(rows !== null) {
         for(var i = 0, len = rows.length; i < len; i++) {
           row = $(rows[i]);
           if(row.data(this.settings.nodeIdAttr) !== null) {
-            node = new Node(row, this.tree, this, this.settings);
+            node = new Node(row, this.nodesObj, this, this.settings);
             this.nodes.push(node);
-            this.tree[node.id] = node;
-
-            if(node.parentId != null && this.tree[node.parentId]) {
-              this.tree[node.parentId].addChild(node);
+            this.nodesObj[node.id] = node;
+            if(node.parentId != null && this.nodesObj[node.parentId]) {
+              this.nodesObj[node.parentId].addChild(node);
             } else {
               this.roots.push(node);
             }
@@ -426,8 +498,6 @@
           this.nodes[i].updateMoveableClass();
         }
       }
-      console.log(this.roots)
-
       return this;
     }
 
@@ -441,7 +511,6 @@
     }
 
     Tree.prototype.move = function(node, direction) {
-      console.log(direction)
       node.move(direction); 
       return this;
     }
@@ -463,7 +532,7 @@
         this.roots[0].updateMoveableClass();
         this.roots[this.roots.length-1].updateMoveableClass();
       }
-      delete this.tree[node.id];
+      delete this.nodesObj[node.id];
 
       this.nodes.splice($.inArray(node, this.nodes), 1);
       return this;
@@ -490,10 +559,16 @@
       return this;
     }
 
-    Tree.prototype.sortBranch = function(node, sortFun) {
-      //还没有增加对
-      node.children.sort(sortFunc);
-      this._updateChildRows(node);
+    Tree.prototype.sortBranch = function(node, sortFunc) {
+      
+      if(!node) {
+        this.roots.sort(sortFunc);
+        console.log(this.roots)
+        this.updateRootRows(sortFunc);
+      } else {
+        node.children.sort(sortFunc);
+        this._updateChildRows(node);
+      }
     }
 
     Tree.prototype._updateChildRows = function(parentNode) {
@@ -503,14 +578,80 @@
     //当node = destination时可达到更新children的作用；主要问题在于其效率不是很高，如果是直接用在上下移动的话，所以上下移动是用了fragment进行移动
     Tree.prototype._moveRows = function(node, destination) {
       var children = node.children;
-      node.row.insertAfter(destination.row);
-      node.render();
-
+      if(node.row !== destination.row) {
+        node.row.insertAfter(destination.row);
+        node.render();
+      }
       //注意对应关系，都是插入到父节点的后面的
       for(var i = children.length - 1; i >= 0; i--) {
         this._moveRows(children[i], node);
       }
     } 
+
+    Tree.prototype.search = function(text) {
+      var nodes = this.nodes,
+        results = [],
+        texts = [],
+        search = text;//text.toLowCase()
+      for(var i = 0, len = nodes.length; i < len; i++) {
+        texts = [];
+        texts = getTexts(nodes[i]);
+        for(var j = 0, len1 = texts.length; j < len1; j++) {
+          if(texts[j].indexOf(search) != -1) {
+            results.push(nodes[i]);
+            break;
+          } 
+        }
+      }
+      return results;
+
+      function getTexts(node) {
+        var el = node.row,
+          texts = [],
+          str = '',
+          contentEls = el.find('.x-content');
+        contentEls.each(function(index, contentEl) {
+          str = $(contentEl).text().trim();
+          str = str; //str.toLowCase();
+          texts.push(str);
+        })
+        return texts;
+      }
+    }
+
+    Tree.prototype.scrollTo = function(top) {
+      var tbody = this.table.find('.x-tbody').get(0);
+      if(tbody) {
+        var tree = this;
+        if(tree.animateTimeout) {
+          clearTimeout(tree.animateTimeout);
+          delete tree.animateTimeout;
+        }
+        var height = tbody.clientHeight,
+          bottom = tbody.scrollHeight - height,
+          finalScrollTop = Math.min(Math.max(top - height / 3, 0), bottom);
+        console.log('top', top)
+        console.log('height',height)
+        var animate = function() {
+          console.log(height, bottom, finalScrollTop)
+          var scrollTop = tbody.scrollTop;
+          var diff = finalScrollTop - scrollTop;
+          if(Math.abs(diff) > 10) {
+            var newScrollTop = tbody.scrollTop + diff / 3;
+            $(tbody).scrollTop(newScrollTop);
+            //this.animateCallback = callback;
+            this.animateTimeout = setTimeout(animate, 100);
+          } else {
+            //finished
+            $(tbody).scrollTop(finalScrollTop);
+            clearTimeout(this.animateTimeout)
+            delete this.animateTimeout;
+            //delete this.animateCallback;
+          }
+        }
+        animate();
+      }
+    }
 
     return Tree;
   })();
@@ -524,43 +665,73 @@
 
 
   //在生成模板的时候，注意应该把数据的转换与数据嵌入模板分离开来，因为这样可以不用在生成模块的时候边考虑数据形式，genTrp里面的 parseLists函数就是为了在生成模板时不用去计算ttid和进行递归而直接对数据行进行了处理成一个tr，tr方便后面模板的生成
-  function genTpl(thead, lists, options) {
-    var tdArr = [],
-      trArr = [],
-      settings = options;
-    var headTpl = genthead(thead, options),
-      bodyTpl = gentbody(lists, options),
-      footTpl = gentfoot(options);
+  genTpl = (function(){
+    function genTpl(obj) {
+      this.tdArr = [];
+      this.trArr = [];
+      this.options = {};
+      this.initTtid = 1;
+      this.thead = [];
+      this.data = {}; //用于构建树的主要数据
+      //下面为上述部分对象赋值
+      for(var key in obj) {
+        this[key] = obj[key];
+      }
+    }
 
-    var tpl = headTpl + bodyTpl + footTpl;
-    return tpl;
+    genTpl.prototype.genTable = function() {
+      var headTpl = this.genthead(),
+        bodyTpl = this.gentbody(),
+        footTpl = this.gentfoot();
 
-    function genthead(thead) {
+      return headTpl + bodyTpl + footTpl;
+    }
+
+    genTpl.prototype.genExtendBody = function() {
+      this.parseTable();
+      var tpl = '',
+        self = this;
+      this.trArr.forEach(function(tr) {
+        tpl += self.genTr(tr);
+      })
+      return tpl;
+    }
+
+    genTpl.prototype.genthead = function() {
       var tpl = `
         <div class="x-treetable">
           <div class="x-thead">
             <div class="x-tr">
       `;
-      thead.forEach(function(value) {
+      this.thead.forEach(function(value) {
         tpl += `<span class="x-th">${value}</span>`;
       })
 
+      var searchTpl = ''
+      console.log(this.options)
+      if(this.options.searchable) {
+        searchTpl = `<span class="x-th x-search"><div class="x-search-box"><span><input placeholder="搜索"></span><span class="x-search-next">&#9660;</span><span class="x-search-pre">&#9650;</span></div></span>`
+      }
+
+      tpl += searchTpl;
+
       tpl += "</div></div>";
-      return tpl;
+      return tpl;      
     }
 
-    function gentbody(lists) {
-      parseTable(lists)
+    genTpl.prototype.gentbody = function() {
+      this.parseTable()
 
-      var tpl = '<div class="x-tbody">';
-      trArr.forEach(function(tr) {
-        tpl += genTr(tr);
+      var tpl = '<div class="x-tbody">',
+        self = this;
+      this.trArr.forEach(function(tr) {
+        tpl += self.genTr(tr);
       })
       tpl += '</div>'
-      return tpl;
+      return tpl;      
     }
 
-    function genTr(tr, action) {
+    genTpl.prototype.genTr = function(tr) {
       var dataTpl = '';
       dataTpl += ` data-tt-id="${tr.data.ttid}" ` 
       if(tr.data.parentid) {
@@ -578,7 +749,7 @@
         tdTpl += `<span class="x-td" ${dataTpl}><span class="x-content">${td.name}</span></span>`
       })
       var moveTpl = ''
-      if(settings.moveable) {
+      if(this.options.moveable) {
         moveTpl = `<span class="x-td x-action"><span class="x-action-move x-arrow-up">&#8593;</span><span class="x-action-move x-arrow-down">&#8595;</span></span>`
       }
 
@@ -591,56 +762,83 @@
       return tpl;
     }
 
-    function gentfoot(options) {
+    genTpl.prototype.gentfoot = function() {
       return ''
     }
 
     //列数据转成行数据
-    function parseTable(table) {
+    genTpl.prototype.parseTable = function() {
       //将所有的单个td都放入到trArr中，
-      for (var i = 0, len = table.length; i < len; i++) {
-        parseColumn(table[i]);
+      for (var i = 0, len = this.data.length; i < len; i++) {
+        this.parseColumn(this.data[i]);
       }
       //将td进行分组，成一个个tr, trArr里面的length是td的总数，只要计算出有多个个tr就可以进行分配了。
-      getTr1(lists);
+      this.getTr1();
       //将得到的tdArr再进行一步操作，将其格式变为一个数级，数组里面的单项为{data:{}, td:[]}, data是ttid, parentid
       if(trArr === false) {
         return;
       }
-      getTr2();
-      console.log(trArr)
+      this.getTr2();
     }
 
-    function getTr1(table) {
-      var trNum = getTrNum(table[0]),
+    genTpl.prototype.getTr1 = function() {
+      var trNum = getTrNum(this.data[0]),
         average = tdArr.length / trNum;
+
       if (!isInteger(average)) {
         alert('输入的结构有误,数据之间没有对应');
-        trArr = false;
+        this.trArr = false;
         return;
       }
 
-      trArr = new Array(trNum);
+      this.trArr = new Array(trNum);
       for (var i = 0; i < trNum; i++) {
-        trArr[i] = new Array();
+        this.trArr[i] = new Array();
       }
 
       var index = 0;
-      for (var i = 0, tdlen = tdArr.length; i < tdlen; i++) {
+      for (var i = 0, tdlen = this.tdArr.length; i < tdlen; i++) {
         index = index === trNum ? 0 : index;
-        trArr[index++].push(tdArr[i])
+        this.trArr[index++].push(this.tdArr[i])
       }
     }
-
-    function getTr2() {
+    
+    genTpl.prototype.getTr2 = function() {
       var result = [];
-      trArr.forEach(function(tr) {  
+      this.trArr.forEach(function(tr) {  
         var rsl = separateData(tr);
         result.push(rsl);
       })
-      trArr = result;
+      this.trArr = result;
     }
 
+    genTpl.prototype.parseColumn = function(column) {
+      var ttid = this.initTtid, 
+        parentid = undefined;
+      for (var i = 0; i < column.length;i++) {
+        this.parseTree(column[i], ttid++, parentid);
+      }
+    }
+
+    genTpl.prototype.parseTree = function(nodesObj, ttid, parentid) {
+      var td = {
+        name: nodesObj.name,
+        ttid: ttid,
+        parentid: parentid
+      };
+      tdExtend(td, nodesObj);
+      this.tdArr.push(td);
+      var subTreeSet = nodesObj.sub;
+      if (subTreeSet.length !== 0) {
+        var parentid = parentid ? parseInt('' + parentid + ttid) : ttid; //这里要转成真正的ttid，是以parentid为前缀的
+        ttid = 1;
+        for (var i = 0, len = subTreeSet.length; i < len; i++) {
+          this.parseTree(subTreeSet[i], ttid++, parentid)
+        }
+      }
+    }
+
+    //辅助函数
     function separateData(tr) {
       var data = {},
         tds = [];
@@ -657,7 +855,6 @@
         tds: tds
       }
     }
-
     function getTrNum(column) {
       var count = 0;
       (function(column) {
@@ -675,32 +872,6 @@
       return Math.floor(num) === num;
     }
 
-    function parseColumn(column) {
-      var ttid = 1,
-        parentid = undefined;
-      for (var i = 0; i < column.length;i++) {
-        parseTree(column[i], ttid++, parentid);
-      }
-    }
-
-    function parseTree(tree, ttid, parentid) {
-      var td = {
-        name: tree.name,
-        ttid: ttid,
-        parentid: parentid
-      };
-      tdExtend(td, tree);
-      tdArr.push(td);
-      var subTreeSet = tree.sub;
-      if (subTreeSet.length !== 0) {
-        var parentid = parentid ? parseInt('' + parentid + ttid) : ttid; //这里要转成真正的ttid，是以parentid为前缀的
-        ttid = 1;
-        for (var i = 0, len = subTreeSet.length; i < len; i++) {
-          parseTree(subTreeSet[i], ttid++, parentid)
-        }
-      }
-    }
-
     function tdExtend(td, column) {
       for (var name in column) {
         if (name !== 'sub' && name !== 'name') {
@@ -708,7 +879,179 @@
         }
       }
     }
-  }
+    return genTpl;
+  })()
+
+  Search = (function(){
+    var search = function(table, tree) {
+      this.contain = table.find('.x-search');
+      this.table = table;
+      this.tree = tree;
+      this.inputEl = table.find('.x-search input');
+      this.preEl = table.find('.x-search .x-search-pre');
+      this.nextEl = table.find('.x-search .x-search-next');
+      this.resultShow = table.find('.x-search .x-search-result');
+      this.delay = 200; //ms
+      this.timeout = undefined;
+      this.lastText = '';
+      this.results = [];
+      this.resultIndex;
+      this.activeResult;
+
+      //判断事件
+      var self = this;
+      this.inputEl.on('input', function(e) {
+        self._onDelayedSearch(e);
+      })
+      this.inputEl.on('change', function(e) {
+        self._onSearch();
+      })
+      this.inputEl.on('keydown', function(e) {
+        self._onKeyDown(e);
+      })
+      this.inputEl.on('keyup', function(e) { //for IE9
+        self._onKeyUp(e);
+      })
+
+      this.preEl.on('click', function() {
+        self.pre()
+      })
+
+      this.nextEl.on('click', function() {
+        self.next()
+      })
+    }
+
+    search.prototype._clearDelay = function() {
+      if(this.timeout != undefined) {
+        clearTimeout(this.timeout);
+        delete this.timeout;
+      }
+    }
+
+    search.prototype._onDelayedSearch = function(e) {
+      this._clearDelay();
+      var self = this;
+      this.timeout = setTimeout(function(event) {
+        self._onSearch();
+      }, this.delay);
+    } 
+
+    search.prototype._onSearch = function(forceSearch) {
+      this._clearDelay();
+      var value = this.inputEl.val();
+      var text = (value.length > 0) ? value : undefined;
+      if(text != this.lastText || forceSearch) {
+        this.lastText = text;
+        this.results.forEach(function(node) {
+          delete node.searchHightligth;
+          node.updateSearchClass();
+        })
+        this.results = this.tree.search(text);
+        console.log(this.results)
+
+        this.results.forEach(function(node) {
+          node.searchHightligth = true;
+          node.updateSearchClass();
+        })
+        this._setActiveResult(0);
+
+        if(text != undefined) {
+          var resultCount = this.results.length;
+          switch (resultCount) {
+            case 0: this.resultShow.text('no&nbsp;results'); break;
+            default: this.resultShow.text(resultCount + ' results'); break
+          }
+        } else {
+          this.resultShow.text('');
+        }
+      }
+    }
+
+    search.prototype._onKeyDown = function(event) {
+      var keynum = event.which;
+      if(keynum == 27) { //ESC
+        this.inputEl.val('');
+        this._onSearch();
+        event.preventDefault();
+        event.stopPropagation();
+      } else if(keynum == 13) { //Enter
+        if(event.ctrlKey) { //force to search again
+          this._onSearch(true);
+        } else if(event.shiftKey) {
+          this.previous();   //move to the previous search result
+        } else {
+          this.next() //move to the next search result
+        }
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+
+    search.prototype._onKeyUp = function (event) {
+      var keynum = event.keyCode;
+      if (keynum != 27 && keynum != 13) { // !show and !Enter
+        this._onDelayedSearch(event);   // For IE 9
+      }
+    };
+
+    search.prototype.clear = function() {
+      this.inputEl.val('');
+      this._onSearch();
+    }
+
+    search.prototype.destroy = function() {
+      this.tree = null;
+      this.contain.remove();
+      this.results = null;
+      this.activeResult =null;
+
+      this._clearDelay();
+    }
+
+    search.prototype._setActiveResult = function(index) {
+      if(this.activeResult) {
+        var preNode = this.activeResult
+        delete preNode.searchActive;
+        preNode.updateSearchClass();
+      }
+      if(!this.results || !this.results[index]) {
+        this.resultIndex = undefined;
+        this.activeResult = undefined;
+        return;
+      }
+
+      this.resultIndex = index;
+      var node = this.results[this.resultIndex];
+      node.searchActive = true;
+      this.activeResult = this.results[this.resultIndex];
+      node.updateSearchClass();
+      node.scrollTo();
+    } 
+
+    search.prototype.next = function() {
+      if(this.results != undefined) {
+        var index = (this.resultIndex != undefined) ? this.resultIndex + 1 : 0;
+        if(index > this.results.length - 1) {
+          index = 0;
+        }
+      }
+      this._setActiveResult(index, focus);
+    }
+
+    search.prototype.previous = function() {
+      if(this.results != undefined) {
+        var max = this.results.length - 1;
+        var index = (this.resultIndex != undefined) ? this.resultIndex - 1 : max;
+        if(index < 0) {
+          index = max;
+        }
+      }
+      this._setActiveResult(index)
+    }
+
+    return search;
+  })()
 
   //用于根据数据来生成一个tr,这个是要添加到对应的node里面的
   function genTrTpl(table, node, tds) {
@@ -745,6 +1088,7 @@
     var tpl = `<div class="x-tr" ${dataTpl}> ${tdTpl} ${moveTpl} </div>`
     return tpl;
   }
+
   methods = {
     /**
       用于生成对应的类表格tpl并插入到this里面，
@@ -754,11 +1098,15 @@
       //这里的好处在于一次性生成模板数据，然后一次性放入到页面，然后再基于原本的页面table DOM去生成对应的tree树对应到DOM树；
     **/
     genTable: function(thead, lists, options) {
-      var tpl = genTpl(thead, lists, options);
+      var initTtid = 1,
+        tpl = genTpl(thead, lists, options, initTtid);
+        gen = new genTpl({thead: thead, data: lists, options: options, initTtid: initTtid});
+        tpl = gen.genTable()
       $(this).empty();
       $(this).append($(tpl));
       $(this).find('.x-treetable').xtreetable('init', options)
     },
+
     /*
       用于初始化对应的this为容器下面的table为一个treetable
     */
@@ -767,7 +1115,7 @@
 
       settings = $.extend({
         indent: 19 ,//每级的缩进量,
-        initialState: 'collapsed', //开始的状态
+        initialState: 'Collapse', //开始的状态
         nodeIdAttr: 'ttId', //对应到data-tt-id,
         parentIdAttr: 'ttParentId', //对应到data-tt-parent-id
         branchAttr: 'ttBranch',
@@ -775,7 +1123,9 @@
         column: 0,
         expandable: true,
         moveUpElClass: '.x-arrow-up',
-        moveDownElClass: '.x-arrow-down'
+        moveDownElClass: '.x-arrow-down',
+        expanderTemplate: '<span class="symbol">&#9662;</span>',
+        collapserTemplate: '<span class="symbol">&#8227;</span>'
       }, options)
       //防止被改
       settings.nodeIdAttr = 'ttId';
@@ -789,29 +1139,34 @@
           tree.loadRows(likeTable.getRows(table)).render();
           table.data('xtreetable', tree);
         }
-
+        if(settings.searchable) {
+          var search = new Search(table, tree);
+        }
         return table;
       })
     },
+
     node: function(id) {
-      return this.data("xtreetable").tree[id];
+      return this.data("xtreetable").nodesObj[id];
     },
+
     move: function(node, direction) {
       var settings = this.data('xtreetable').settings,
-        tree = this.data('xtreetable');
+        nodesObj = this.data('xtreetable');
       if(!settings.moveable) {
         alert('没有配置moveable参数')
       } else {
         if(node) {
-          tree.move(node, direction);
+          nodesObj.move(node, direction);
         } else {
           alert('无效的node')
         }
       }
       return this;
     },
+
     removeNode: function(id) {
-      var node = this.data('xtreetable').tree[id];
+      var node = this.data('xtreetable').nodesObj[id];
       if(node) {
         this.data('xtreetable').removeNode(node);
       } else {
@@ -819,17 +1174,39 @@
       }
       return this;
     },
+
     //data的格式为[td, td, td], td = {name: ...}
     addNode: function(node, tds) {
       var row = genTrTpl(this, node, tds);
       return $(this).xtreetable('loadBranch', node, row);
     },
+
+    //用于继承扩展树，主要是用于针对分批加载table和后继增长的情况，是在root上增长的;
+    //tds的结构类似一开始的genTable时的数据一样，是一个双层数组
+    extendsTree: function(tds, options) {
+      var xtreetable = this;
+      if(!$(this).hasClass('x-treetable')) {
+        xtreetable = $(this).find('.x-treetable');
+      }
+      var initTtid = xtreetable.data('xtreetable').getNextRootId(),
+        gen = new genTpl({data: tds, options: options, initTtid: initTtid});
+        tpl = gen.genExtendBody();
+      $(xtreetable).xtreetable('loadBranch', undefined, tpl);
+    },
+
+    collapseAll: function() {
+      this.data("xtreetable").collapseAll();
+      return this;
+    },    
+
+    //node为空时表示，作为根结点插入
     loadBranch: function(node, rows) {
       var settings = this.data("xtreetable").settings,
-        tree = this.data("xtreetable").tree;
-      rows = $(rows);
+        nodesObj = this.data("xtreetable").nodesObj;
+      rows = $(rows).filter('.x-tr'); //确保只进行xtr的对应，不要把.x-content也包进行了
+
       if(node == null) {
-        this.append(rows);
+        this.find('.x-tbody').append(rows);
       } else {
         var lastNode = this.data("xtreetable").findLastNode(node)
         rows.insertAfter(lastNode.row);
@@ -838,16 +1215,23 @@
 
       //确保所有的节点都初始化;
       rows.filter('.x-tr').each(function() {
-        tree[$(this).data(settings.nodeIdAttr)].show();
+        nodesObj[$(this).data(settings.nodeIdAttr)].init();
       })
+
+      if(settings.initialState === 'Collapse') {
+        rows.filter('.x-tr').each(function() {
+          nodesObj[$(this).data(settings.nodeIdAttr)].hide();
+        })
+      }
 
       if(node != null) {
         node.render().expand();
       }
       return this;
     },
+
     sortBranch: function(node, columnOrFunction, direction) {
-      var settings = this.data('xtreetablee').settings,
+      var settings = this.data('xtreetable').settings,
         sortFunc;
       columnOrFunction = columnOrFunction || settings.column;
       sortFunc = columnOrFunction;
@@ -855,7 +1239,7 @@
         sortFunc = function(a, b) {
           var extractValue, valA, valB;
           extractValue = function(node) {
-            var val = node.row.find('.x-td:eq('+columnOrFunction+')').text();
+            var val = node.row.find('.x-td:eq('+columnOrFunction+')').find('.x-content').text();
             return $.trim(val).toUpperCase();
           }
           valA = extractValue(a);
@@ -863,15 +1247,15 @@
           if(direction == '+') {
             if(valA < valB)
               return -1;
-            if(valB > valB)
+            if(valA > valB)
               return 1;
           } else {
             if(valA > valB)
               return -1;
-            if(valB < valB)
+            if(valA < valB)
               return 1;
           }
-          return 0
+          return 0;
         }
       }
       this.data('xtreetable').sortBranch(node, sortFunc);
