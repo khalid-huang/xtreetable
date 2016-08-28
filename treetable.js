@@ -398,11 +398,21 @@
           parent = parent.parentNode();
         }
       }
-/*      console.log('tbody-top', this.tree.table.find('.x-tbody').offset().top)
-      console.log('node-top', this.row.offset().top)
-      console.log('node-top-position', this.row.position().top)*/
-      //这个bug是怎么加速呢，表现为这里面的top与实际的表现不符中，第四个的时候会突然比前面的小
-      this.tree.scrollTo(this.row.position().top)
+
+      var top = getRowTop(this.tree.table, this.row, this.settings.trHeight);
+      this.tree.scrollTo(top)
+
+
+      //获取对应元素相对于tbody的真正高度,使用jquery的scrollTop会有问题，老是数据不准
+      function getRowTop(table, row, height) {
+        var trs = table.find('.x-tbody .x-tr').toArray();
+        var index = trs.indexOf(row.toArray()[0]);
+        trs.splice(index);
+        trs = trs.filter(function(el) {
+          return $(el).css('display') !== 'none';
+        })
+        return trs.length * height;
+      }
     }
 
     return Node;
@@ -632,6 +642,9 @@
           finalScrollTop = Math.min(Math.max(top - height / 3, 0), bottom);
         console.log('top', top)
         console.log('height',height)
+        console.log('bottom', bottom)
+        //$(tbody).scrollTop(finalScrollTop)
+        //下面是用于实现动画的，但是有些bug
         var animate = function() {
           console.log(height, bottom, finalScrollTop)
           var scrollTop = tbody.scrollTop;
@@ -640,7 +653,11 @@
             var newScrollTop = tbody.scrollTop + diff / 3;
             $(tbody).scrollTop(newScrollTop);
             //this.animateCallback = callback;
-            this.animateTimeout = setTimeout(animate, 100);
+            //这个是为了避免出现没有引用的animateTimeout而设置的
+            if(this.animateTimeout) {
+              clearTimeout(this.animateTimeout)
+            }
+            this.animateTimeout = setTimeout(animate, 100); //用于实现动画的，但是有个bug。
           } else {
             //finished
             $(tbody).scrollTop(finalScrollTop);
@@ -914,7 +931,7 @@
       })
 
       this.preEl.on('click', function() {
-        self.pre()
+        self.previous()
       })
 
       this.nextEl.on('click', function() {
@@ -1125,7 +1142,8 @@
         moveUpElClass: '.x-arrow-up',
         moveDownElClass: '.x-arrow-down',
         expanderTemplate: '<span class="symbol">&#9662;</span>',
-        collapserTemplate: '<span class="symbol">&#8227;</span>'
+        collapserTemplate: '<span class="symbol">&#8227;</span>',
+        trHeight: 36 //每个tr的高度
       }, options)
       //防止被改
       settings.nodeIdAttr = 'ttId';
